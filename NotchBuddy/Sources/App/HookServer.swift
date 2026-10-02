@@ -81,6 +81,39 @@ final class HookServer: @unchecked Sendable {
         }
     }
 
+    /// Records the answer to the current OpenClaw question; sends all answers once the last one is given.
+    @MainActor
+    func answerQuestion(_ answer: String) {
+        guard var q = AppState.shared.pendingQuestion, let item = q.currentItem else { return }
+        q.answers[item.id] = [answer]
+        q.current += 1
+        guard q.currentItem == nil else { AppState.shared.pendingQuestion = q; return }
+        let id = q.requestId, answers = q.answers
+        Task.detached {
+            do {
+                try ClaudeService.openClawBridge(["op": "answer", "id": id, "answers": answers]) { _ in }
+            } catch {
+                appendAppLog("nb.log", "OpenClaw answer failed: \(error.localizedDescription)")
+            }
+        }
+        dismissQuestionCard(note: "Answer sent.")
+    }
+
+    /// Closes the question card. The question stays pending in OpenClaw unless it was answered.
+    @MainActor
+    func dismissQuestionCard(note: String) {
+        let state = AppState.shared
+        guard let pillId = state.pendingQuestion?.pillId else { return }
+        state.pendingQuestion = nil
+        state.isPinned = false
+        state.updateTask(id: pillId, state: .working)
+        state.noteMessage = note
+        state.view = .note
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+            NotificationCenter.default.post(name: .islandCollapse, object: nil)
+        }
+    }
+
     /// Returns the tool_input serialized as sorted-keys JSON, "" if absent or empty.
     /// Same computation used in processPermissionRequest and processEvent to match PostToolUse.
     private static func approvalInputKey(_ input: [String: Any]) -> String {
@@ -380,6 +413,28 @@ final class HookServer: @unchecked Sendable {
             activeSessionId = nil
             state.removeTask(id: agentId)
 
+        case "OpenClawQuestion":
+            guard let q = payload["question"] as? [String: Any],
+                  let requestId = q["id"] as? String,
+                  let raw = q["items"] as? [[String: Any]] else { break }
+            let items = raw.compactMap { item -> QuestionInfo.Item? in
+                guard let id = item["id"] as? String, let text = item["text"] as? String else { return nil }
+                return .init(id: id, text: text, options: item["options"] as? [String] ?? [])
+            }
+            guard !items.isEmpty else { break }
+            upsertWorkspaceTask(id: agentId, projectName: projectName, cwd: cwd)
+            state.pendingQuestion = QuestionInfo(requestId: requestId, pillId: agentId, items: items)
+            state.updateTask(id: agentId, state: .question)
+            state.isPinned = true
+            SoundEngine.shared.play("approval")
+            withAnimation(.spring(response: 0.5, dampingFraction: 0.72)) { state.focusId = agentId }
+            expandIfNeeded(to: .question)
+
+        case "OpenClawQuestionResolved":
+            if state.pendingQuestion?.requestId == payload["question_id"] as? String {
+                dismissQuestionCard(note: "Answered in OpenClaw.")
+            }
+
         case "SubagentStart":
             appendStep(id: agentId, step: "+ subagent")
 
@@ -433,7 +488,7 @@ final class HookServer: @unchecked Sendable {
         let state = AppState.shared
         let isAlert: Bool
         switch view {
-        case .approval, .finished, .error, .confused: isAlert = true
+        case .approval, .question, .finished, .error, .confused: isAlert = true
         default: isAlert = false
         }
         if state.mode == .expanded {

@@ -247,6 +247,7 @@ final class AppState: ObservableObject {
 
     // Pending approval request from Claude Code hook
     @Published var pendingApproval: ApprovalInfo? = nil
+    @Published var pendingQuestion: QuestionInfo? = nil
 
     // MARK: - Init (loads persisted settings)
 

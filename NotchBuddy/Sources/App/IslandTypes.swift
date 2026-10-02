@@ -40,6 +40,23 @@ struct ApprovalInfo: Sendable {
     var pillId: String
 }
 
+// MARK: - Question info (OpenClaw question.requested, answered from the notch)
+
+struct QuestionInfo: Sendable {
+    struct Item: Sendable {
+        var id: String
+        var text: String
+        var options: [String]   // empty → free-text answer
+    }
+    var requestId: String
+    var pillId: String
+    var items: [Item]
+    var current = 0
+    var answers: [String: [String]] = [:]
+
+    var currentItem: Item? { current < items.count ? items[current] : nil }
+}
+
 // MARK: - Pill badge (shown on pill edge when non-focused task has an alert)
 
 enum PillBadge { case approval, finished, error }

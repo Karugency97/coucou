@@ -3,6 +3,7 @@
 // Connects to an OpenClaw Gateway as a paired operator device and relays
 //   • live agent activity (lifecycle + tool events)  → Coucou hook socket (coucou_agent "openclaw")
 //   • exec / plugin approval requests                 → Coucou approval card, decision → approval resolve
+//   • agent questions (question.requested)            → Coucou question card, answer → question.resolve
 //   • notch chat: local socket openclaw-chat.sock ⇄ chat.send / chat events (persistent agent:<id>:coucou session)
 
 import { GatewayClient } from "@openclaw/gateway-client";
@@ -136,6 +137,26 @@ function onApprovalResolved(p) {
   if (cancel) { pending.delete(p.id); cancel(); } // closes the socket → Coucou shows "Handled in OpenClaw."
 }
 
+// Secret questions (API keys…) stay in OpenClaw's own UI — never route secrets through the notch.
+// ponytail: multiSelect is answered with one choice and "Other" free text only when there are no options.
+function onQuestionRequested(p) {
+  const qs = p?.questions ?? [];
+  if (!p?.id || !qs.length || qs.some((q) => q.isSecret)) return;
+  sendToCoucou({
+    hook_event_name: "OpenClawQuestion",
+    session_id: p.sessionKey ?? p.id,
+    cwd: `/openclaw/${p.agentId ?? agentOf(p)}`,
+    question: {
+      id: p.id,
+      items: qs.map((q) => ({
+        id: q.questionId,
+        text: q.question,
+        options: (q.options ?? []).map((o) => o.label),
+      })),
+    },
+  });
+}
+
 // ── Gateway client ──
 const client = new GatewayClient({
   url,
@@ -144,7 +165,7 @@ const client = new GatewayClient({
   clientDisplayName: "Coucou",
   mode: "cli",
   role: "operator",
-  scopes: ["operator.read", "operator.write", "operator.approvals"],
+  scopes: ["operator.read", "operator.write", "operator.approvals", "operator.questions"],
   caps: ["tool-events", "exec-approvals", "plugin-approvals"],
   minProtocol: PROTOCOL_VERSION,
   maxProtocol: PROTOCOL_VERSION,
@@ -179,6 +200,8 @@ const client = new GatewayClient({
       case "exec.approval.requested": return void onApprovalRequested("exec", evt.payload);
       case "plugin.approval.requested": return void onApprovalRequested("plugin", evt.payload);
       case "chat": return onChatEvent(evt.payload);
+      case "question.requested": return onQuestionRequested(evt.payload);
+      case "question.resolved": return sendToCoucou({ hook_event_name: "OpenClawQuestionResolved", question_id: evt.payload?.id });
       case "exec.approval.resolved":
       case "plugin.approval.resolved": return onApprovalResolved(evt.payload);
     }
@@ -213,6 +236,10 @@ function onChatEvent(p) {
 
 async function handleChatRequest(req, conn) {
   const write = (obj) => { if (!conn.destroyed) conn.write(JSON.stringify(obj) + "\n"); };
+  if (req.op === "answer") {
+    await client.request("question.resolve", { id: req.id, answers: { answers: req.answers }, resolvedBy: "coucou" });
+    return conn.end(JSON.stringify({ type: "ok" }) + "\n");
+  }
   if (req.op === "agents") {
     const r = await client.request("agents.list", {});
     return conn.end(JSON.stringify({ type: "agents", defaultId: r.defaultId, agents: r.agents.map((a) => a.id) }) + "\n");

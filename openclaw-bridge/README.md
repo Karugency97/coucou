@@ -6,6 +6,7 @@ Shows an OpenClaw Gateway (local or on a VPS) in the notch:
 |---|---|
 | Live sessions (thinking, tools, finished) | `bridge.mjs` → Coucou socket, pill **OpenClaw** |
 | Approvals (exec + plugin) | `bridge.mjs` → Allow / Always / Deny card → `exec.approval.resolve` / `plugin.approval.resolve` |
+| Agent questions | `bridge.mjs` → question card (options or free text, up to 3 questions in a row) → `question.resolve`. Secret questions stay in OpenClaw |
 | Chat | Coucou → `openclaw-chat.sock` → `chat.send`, streamed; one persistent `agent:<id>:coucou` session per agent (provider **OpenClaw** in the model picker, type `/new` to reset) |
 
 GitHub build only (the App Store build has no approval cards for third-party agents).
@@ -31,7 +32,7 @@ It reads the URL and token from Coucou's Keychain items (macOS asks once — cli
 or from `OPENCLAW_GATEWAY_URL` / `OPENCLAW_GATEWAY_TOKEN`.
 
 First run: the Mac is a new device, so the Gateway asks for pairing (scopes `operator.read`,
-`operator.write`, `operator.approvals`). On the VPS (Hostinger: `docker exec -it <container> …`):
+`operator.write`, `operator.approvals`, `operator.questions`). On the VPS (Hostinger: `docker exec -it <container> …`):
 
 ```bash
 openclaw devices list

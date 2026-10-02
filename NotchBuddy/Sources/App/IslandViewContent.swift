@@ -265,17 +265,31 @@ struct ApprovalView: View {
 
 struct QuestionView: View {
     @ObservedObject var state: AppState
+    @State private var reply = ""
+
+    private var item: QuestionInfo.Item? { state.pendingQuestion?.currentItem }
 
     var body: some View {
         ZStack {
             CardBackground(wash: .cyan)
             VStack(alignment: .leading, spacing: 5) {
-                AgentWho(task: state.focusTask, label: "Claude Code is asking a question")
-                Text("Which search engine to use?")
+                AgentWho(task: state.focusTask, label: "is asking a question")
+                Text(item?.text ?? "…")
                     .font(.system(size: 15, weight: .semibold))
+                    .lineLimit(2)
                 HStack(spacing: 8) {
-                    ForEach(["Postgres full-text", "Meilisearch", "Algolia"], id: \.self) { opt in
-                        SecondaryButton(opt) { /* answer */ }
+                    if let item, item.options.isEmpty {
+                        TextField("Your answer", text: $reply)
+                            .textFieldStyle(.roundedBorder)
+                            .onSubmit(sendReply)
+                        PrimaryButton("Send", action: sendReply)
+                    } else {
+                        ForEach(item?.options ?? [], id: \.self) { opt in
+                            SecondaryButton(opt) { HookServer.shared.answerQuestion(opt) }
+                        }
+                    }
+                    SecondaryButton("Later") {
+                        HookServer.shared.dismissQuestionCard(note: "Still waiting in OpenClaw.")
                     }
                 }
             }
@@ -284,6 +298,13 @@ struct QuestionView: View {
             .padding(.vertical, 4)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+    }
+
+    private func sendReply() {
+        let text = reply.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        reply = ""
+        HookServer.shared.answerQuestion(text)
     }
 }
 
