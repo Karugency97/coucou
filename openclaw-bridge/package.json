@@ -1,0 +1,13 @@
+{
+  "name": "coucou-openclaw-bridge",
+  "private": true,
+  "type": "module",
+  "description": "Relays OpenClaw Gateway sessions and approvals to Coucou's notch",
+  "bin": { "coucou-openclaw-bridge": "bridge.mjs" },
+  "scripts": { "start": "node bridge.mjs" },
+  "engines": { "node": ">=22.19.0" },
+  "dependencies": {
+    "@openclaw/gateway-client": "2026.8.1",
+    "@openclaw/gateway-protocol": "2026.8.1"
+  }
+}

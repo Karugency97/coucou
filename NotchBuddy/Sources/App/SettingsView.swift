@@ -52,6 +52,8 @@ struct SettingsView: View {
     // Multi-provider chat keys
     @State private var googleKey: String  = KeychainStore.shared.get("google-api-key") ?? ""
     @State private var openAIKey: String  = KeychainStore.shared.get("openai-api-key") ?? ""
+    @State private var openClawURL: String   = KeychainStore.shared.get("openclaw-gateway-url")   ?? ""
+    @State private var openClawToken: String = KeychainStore.shared.get("openclaw-gateway-token") ?? ""
 
     // Integration keys
     @State private var resendKey: String    = KeychainStore.shared.get("resend-api-key")  ?? ""
@@ -157,6 +159,26 @@ struct SettingsView: View {
                         Button("Save") {
                             KeychainStore.shared.set("openai-api-key", value: openAIKey)
                             statusMessage = "✓ OpenAI key saved."
+                        }
+                        .buttonStyle(.borderedProminent)
+
+                        Divider()
+
+                        HStack(spacing: 8) {
+                            Circle().fill(Color(hex: ChatProvider.openclaw.accentHex)).frame(width: 8, height: 8)
+                            Text("OpenClaw").font(.system(size: 12, weight: .semibold))
+                        }
+                        TextField("Gateway URL (wss://…)", text: $openClawURL)
+                            .textFieldStyle(.roundedBorder)
+                        SecureField("Gateway token", text: $openClawToken)
+                            .textFieldStyle(.roundedBorder)
+                        Text("Chat, sessions and approvals go through openclaw-bridge (see openclaw-bridge/README.md).")
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
+                        Button("Save") {
+                            KeychainStore.shared.set("openclaw-gateway-url", value: openClawURL.trimmingCharacters(in: .whitespacesAndNewlines))
+                            KeychainStore.shared.set("openclaw-gateway-token", value: openClawToken)
+                            statusMessage = "✓ OpenClaw Gateway saved."
                         }
                         .buttonStyle(.borderedProminent)
                     }
@@ -854,7 +876,8 @@ struct SettingsView: View {
             #endif
             if def.category == .ai {
                 let keyId = def.id == "ai_anthropic" ? "anthropic-api-key"
-                           : def.id == "ai_google"    ? "google-api-key" : "openai-api-key"
+                           : def.id == "ai_google"    ? "google-api-key"
+                           : def.id == "ai_openclaw"  ? "openclaw-gateway-token" : "openai-api-key"
                 if KeychainStore.shared.get(keyId) == nil { return "Key not configured" }
             }
             return nil
