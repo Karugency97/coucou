@@ -57,10 +57,10 @@ enum PillCatalog {
               category: .workspace, subtitle: "Integration",  source: .agent,  githubOnly: true),
         .init(id: "agent_codex",         name: "Codex",       color: "#2DD4BF",
               category: .workspace, subtitle: "Integration",  source: .agent,  githubOnly: true),
+        .init(id: "agent_openclaw",      name: "OpenClaw",    color: ChatProvider.openclaw.accentHex,
+              category: .workspace, subtitle: "Agent",        source: .agent,  githubOnly: true),
         // ── Agents ───────────────────────────────────────────────────────────
         .init(id: "agent_gemini",        name: "Gemini CLI",  color: "#8AB4F8",
-              category: .agent,     subtitle: "Agent",        source: .agent,  githubOnly: true),
-        .init(id: "agent_openclaw",      name: "OpenClaw",    color: ChatProvider.openclaw.accentHex,
               category: .agent,     subtitle: "Agent",        source: .agent,  githubOnly: true),
         // ── AI for the chat ──────────────────────────────────────────────────
         .init(id: "ai_anthropic",        name: "Anthropic",   color: ChatProvider.anthropic.accentHex,
