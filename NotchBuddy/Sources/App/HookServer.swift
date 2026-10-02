@@ -276,7 +276,13 @@ final class HookServer: @unchecked Sendable {
         #endif
         let agentId: String
         let isExternalAgent: Bool
-        if isCodexEvent {
+        var externalName = validAgent
+        if isCodexEvent, let sub = Self.openClawPill(payload) {
+            // One dynamic pill per OpenClaw agent; the catalog pill agent_openclaw keeps the status line.
+            agentId = sub.id
+            externalName = sub.name
+            isExternalAgent = true
+        } else if isCodexEvent {
             agentId = "agent_\(rawAgent)"
             isExternalAgent = false
         } else if let agent = validAgent {
@@ -302,7 +308,7 @@ final class HookServer: @unchecked Sendable {
             switch pending.pillId {
             case "agent_cursor": handledNote = "Handled in Cursor."
             case "agent_codex":  handledNote = "Handled in Codex."
-            case "agent_openclaw": handledNote = "Handled in OpenClaw."
+            case let id where id.hasPrefix("agent_openclaw"): handledNote = "Handled in OpenClaw."
             default:             handledNote = "Handled in VS Code."
             }
             var resolved = false
@@ -332,14 +338,14 @@ final class HookServer: @unchecked Sendable {
 
         case "SessionStart":
             activeSessionId = sessionId
-            if isExternalAgent { upsertExternalAgent(id: agentId, name: validAgent!) } else { upsertWorkspaceTask(id: agentId, projectName: projectName, cwd: cwd) }
+            if isExternalAgent { upsertExternalAgent(id: agentId, name: externalName!) } else { upsertWorkspaceTask(id: agentId, projectName: projectName, cwd: cwd) }
             nbLog("SessionStart \(isExternalAgent ? agentId : projectName) (\(sessionId.prefix(8)))")
             if state.isPresent { expandIfNeeded(to: .overview) }
             SoundEngine.shared.play("work")
 
         case "UserPromptSubmit":
             activeSessionId = sessionId
-            if isExternalAgent { upsertExternalAgent(id: agentId, name: validAgent!) } else { upsertWorkspaceTask(id: agentId, projectName: projectName, cwd: cwd) }
+            if isExternalAgent { upsertExternalAgent(id: agentId, name: externalName!) } else { upsertWorkspaceTask(id: agentId, projectName: projectName, cwd: cwd) }
             state.updateTask(id: agentId, state: .thinking)
             if let prompt = payload["prompt"] as? String, !prompt.isEmpty {
                 appendStep(id: agentId, step: String(prompt.prefix(60)))
@@ -348,7 +354,7 @@ final class HookServer: @unchecked Sendable {
 
         case "PreToolUse":
             activeSessionId = sessionId
-            if isExternalAgent { upsertExternalAgent(id: agentId, name: validAgent!) } else { upsertWorkspaceTask(id: agentId, projectName: projectName, cwd: cwd) }
+            if isExternalAgent { upsertExternalAgent(id: agentId, name: externalName!) } else { upsertWorkspaceTask(id: agentId, projectName: projectName, cwd: cwd) }
             state.updateTask(id: agentId, state: .working)
             let tool = payload["tool_name"] as? String ?? "Tool"
             let input = payload["tool_input"] as? [String: Any] ?? [:]
@@ -422,7 +428,7 @@ final class HookServer: @unchecked Sendable {
                 return .init(id: id, text: text, options: item["options"] as? [String] ?? [])
             }
             guard !items.isEmpty else { break }
-            upsertWorkspaceTask(id: agentId, projectName: projectName, cwd: cwd)
+            if isExternalAgent { upsertExternalAgent(id: agentId, name: externalName!) } else { upsertWorkspaceTask(id: agentId, projectName: projectName, cwd: cwd) }
             state.pendingQuestion = QuestionInfo(requestId: requestId, pillId: agentId, items: items)
             state.updateTask(id: agentId, state: .question)
             state.isPinned = true
@@ -453,6 +459,14 @@ final class HookServer: @unchecked Sendable {
     }
 
     // MARK: - Agent validation + dynamic pill
+
+    /// OpenClaw events tagged with the Gateway agent ("openclaw_agent") get their own pill.
+    /// "_" is not allowed in coucou_agent names, so agent_openclaw_<id> never collides with them.
+    private static func openClawPill(_ payload: [String: Any]) -> (id: String, name: String)? {
+        guard payload["coucou_agent"] as? String == "openclaw",
+              let name = validateAgent(payload["openclaw_agent"] as? String ?? "") else { return nil }
+        return ("agent_openclaw_\(name)", name)
+    }
 
     /// Validates a coucou_agent name: lowercase, digits and hyphens, 1–24 chars.
     /// "claude" is reserved and rejected so it cannot impersonate the Claude Code pill.
@@ -552,7 +566,10 @@ final class HookServer: @unchecked Sendable {
 
         // Determine which workspace pill owns the request.
         let pillId: String
-        if isCodexRequest {
+        let openClawSub = isCodexRequest ? Self.openClawPill(payload) : nil
+        if let sub = openClawSub {
+            pillId = sub.id
+        } else if isCodexRequest {
             pillId = "agent_\(rawAgent)"
         } else if isCursorEditor {
             pillId = "agent_cursor"
@@ -588,7 +605,7 @@ final class HookServer: @unchecked Sendable {
         pendingApprovalFD = fd
         activeSessionId = sessionId
 
-        upsertWorkspaceTask(id: pillId, projectName: projectName, cwd: cwd)
+        if let sub = openClawSub { upsertExternalAgent(id: sub.id, name: sub.name) } else { upsertWorkspaceTask(id: pillId, projectName: projectName, cwd: cwd) }
         state.updateTask(id: pillId, state: .approval)
         state.pendingApproval = ApprovalInfo(sessionId: sessionId, tool: tool,
                                               command: command, inputKey: inputKey, pillId: pillId)
@@ -611,7 +628,7 @@ final class HookServer: @unchecked Sendable {
             switch capturedPillId {
             case "agent_cursor": note = "Handled in Cursor."
             case "agent_codex":  note = "Handled in Codex."
-            case "agent_openclaw": note = "Handled in OpenClaw."
+            case let id where id.hasPrefix("agent_openclaw"): note = "Handled in OpenClaw."
             default:             note = "Handled in VS Code."
             }
             self.dismissApprovalCard(note: note)
@@ -629,7 +646,7 @@ final class HookServer: @unchecked Sendable {
             switch capturedPillId {
             case "agent_cursor": note = "Still waiting in Cursor."
             case "agent_codex":  note = "Still waiting in Codex."
-            case "agent_openclaw": note = "Still waiting in OpenClaw."
+            case let id where id.hasPrefix("agent_openclaw"): note = "Still waiting in OpenClaw."
             default:             note = "Still waiting in VS Code."
             }
             self.dismissApprovalCard(note: note)

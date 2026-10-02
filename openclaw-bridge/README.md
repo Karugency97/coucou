@@ -4,7 +4,7 @@ Shows an OpenClaw Gateway (local or on a VPS) in the notch:
 
 | Feature | Path |
 |---|---|
-| Live sessions (thinking, tools, finished) | `bridge.mjs` → Coucou socket, pill **OpenClaw** |
+| Live sessions (thinking, tools, finished) | `bridge.mjs` → Coucou socket, one dynamic pill per Gateway agent (`agent_openclaw_<id>`, removed ~5 s after the run); the **OpenClaw** pill keeps the status line |
 | Approvals (exec + plugin) | `bridge.mjs` → Allow / Always / Deny card → `exec.approval.resolve` / `plugin.approval.resolve` |
 | Agent questions | `bridge.mjs` → question card (options or free text, up to 3 questions in a row) → `question.resolve`. Secret questions stay in OpenClaw |
 | Status | OpenClaw pill card: `Gateway OK · $0.42 today · 20 cron · 1 failing` (health, `usage.cost`, `cron.status`/`cron.list`), every 5 min; red dot + badge when unhealthy, offline, pairing needed or a cron job failed |

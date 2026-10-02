@@ -87,11 +87,12 @@ function askCoucou(payload) {
 
 // ── Event mapping ──
 const agentOf = (p) => p.agentId ?? /^agent:([^:]+):/.exec(p.sessionKey ?? "")?.[1] ?? "main";
-const base = (p) => ({ session_id: p.sessionKey, cwd: `/openclaw/${agentOf(p)}` }); // Coucou names the pill after cwd's last component
+// openclaw_agent → one pill per Gateway agent in Coucou (status/resolved events without it go to the OpenClaw pill)
+const base = (p) => ({ session_id: p.sessionKey, cwd: `/openclaw/${agentOf(p)}`, openclaw_agent: agentOf(p) });
 
 // OpenClaw tool ids → names Coucou already knows how to label (frenchStep).
 const TOOL_NAMES = { exec: "Bash", read: "Read", write: "Write", edit: "Edit", apply_patch: "Edit",
-  web_fetch: "WebFetch", web_search: "WebSearch", spawn_agent: "Task" };
+  web_fetch: "WebFetch", web_search: "WebSearch", spawn_agent: "Task", ls: "LS", grep: "Grep", glob: "Glob", find: "Glob" };
 
 function onAgentEvent(p) {
   if (!p?.sessionKey || p.isHeartbeat) return;
@@ -118,6 +119,7 @@ async function onApprovalRequested(kind, p) {
   const ask = askCoucou({
     session_id: r.sessionKey ?? id,
     cwd: `/openclaw/${r.agentId ?? agentOf(r)}`,
+    openclaw_agent: r.agentId ?? agentOf(r),
     tool_name: kind === "exec" ? "Bash" : (r.toolName ?? "Plugin"),
     tool_input: toolInput,
   });
@@ -147,6 +149,7 @@ function onQuestionRequested(p) {
     hook_event_name: "OpenClawQuestion",
     session_id: p.sessionKey ?? p.id,
     cwd: `/openclaw/${p.agentId ?? agentOf(p)}`,
+    openclaw_agent: p.agentId ?? agentOf(p),
     question: {
       id: p.id,
       items: qs.map((q) => ({
