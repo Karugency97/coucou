@@ -232,19 +232,19 @@ final class HookServer: @unchecked Sendable {
             bundleId.lowercased().contains("vscode"))
 
         // Routing:
-        // • "codex" → agent_codex (GitHub build only: workspace pill, approvals in the notch)
+        // • "codex" / "openclaw" → agent_<name> (GitHub build only: workspace pill, approvals in the notch)
         // • other valid coucou_agent → external pill (fire-and-forget, no approval card)
         // • Cursor bundle ID → agent_cursor
         // • VS Code → integration_claude
         #if !APPSTORE
-        let isCodexEvent = rawAgent == "codex"
+        let isCodexEvent = rawAgent == "codex" || rawAgent == "openclaw"
         #else
         let isCodexEvent = false
         #endif
         let agentId: String
         let isExternalAgent: Bool
         if isCodexEvent {
-            agentId = "agent_codex"
+            agentId = "agent_\(rawAgent)"
             isExternalAgent = false
         } else if let agent = validAgent {
             agentId = "agent_\(agent)"
@@ -269,6 +269,7 @@ final class HookServer: @unchecked Sendable {
             switch pending.pillId {
             case "agent_cursor": handledNote = "Handled in Cursor."
             case "agent_codex":  handledNote = "Handled in Codex."
+            case "agent_openclaw": handledNote = "Handled in OpenClaw."
             default:             handledNote = "Handled in VS Code."
             }
             var resolved = false
@@ -472,11 +473,11 @@ final class HookServer: @unchecked Sendable {
             termProgram.lowercased().contains("vscode") ||
             bundleId.lowercased().contains("vscode"))
 
-        // Codex gets the same approval card as Claude Code / Cursor (GitHub build only).
+        // Codex and OpenClaw get the same approval card as Claude Code / Cursor (GitHub build only).
         // Other external agents (any other coucou_agent) answer immediately with "ask"
         // so the agent re-asks in its own terminal — they do not get a notch card.
         #if !APPSTORE
-        let isCodexRequest = rawAgent == "codex"
+        let isCodexRequest = rawAgent == "codex" || rawAgent == "openclaw"
         #else
         let isCodexRequest = false
         #endif
@@ -491,7 +492,7 @@ final class HookServer: @unchecked Sendable {
         // Determine which workspace pill owns the request.
         let pillId: String
         if isCodexRequest {
-            pillId = "agent_codex"
+            pillId = "agent_\(rawAgent)"
         } else if isCursorEditor {
             pillId = "agent_cursor"
         } else {
@@ -549,6 +550,7 @@ final class HookServer: @unchecked Sendable {
             switch capturedPillId {
             case "agent_cursor": note = "Handled in Cursor."
             case "agent_codex":  note = "Handled in Codex."
+            case "agent_openclaw": note = "Handled in OpenClaw."
             default:             note = "Handled in VS Code."
             }
             self.dismissApprovalCard(note: note)
@@ -566,6 +568,7 @@ final class HookServer: @unchecked Sendable {
             switch capturedPillId {
             case "agent_cursor": note = "Still waiting in Cursor."
             case "agent_codex":  note = "Still waiting in Codex."
+            case "agent_openclaw": note = "Still waiting in OpenClaw."
             default:             note = "Still waiting in VS Code."
             }
             self.dismissApprovalCard(note: note)

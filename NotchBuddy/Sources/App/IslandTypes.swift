@@ -73,12 +73,14 @@ enum ChatProvider: String, CaseIterable, Codable {
     case anthropic = "anthropic"
     case google    = "google"
     case openai    = "openai"
+    case openclaw  = "openclaw"
 
     var displayName: String {
         switch self {
         case .anthropic: "Anthropic"
         case .google:    "Google"
         case .openai:    "OpenAI"
+        case .openclaw:  "OpenClaw"
         }
     }
 
@@ -87,6 +89,7 @@ enum ChatProvider: String, CaseIterable, Codable {
         case .anthropic: "#E07950"
         case .google:    "#4285F4"
         case .openai:    "#10A37F"
+        case .openclaw:  "#FF5A36"
         }
     }
 
@@ -95,6 +98,7 @@ enum ChatProvider: String, CaseIterable, Codable {
         case .anthropic: "claude-sonnet-4-6"
         case .google:    "gemini-2.0-flash"
         case .openai:    "gpt-4o"
+        case .openclaw:  "main"
         }
     }
 
@@ -103,6 +107,7 @@ enum ChatProvider: String, CaseIterable, Codable {
         case .anthropic: "anthropic-api-key"
         case .google:    "google-api-key"
         case .openai:    "openai-api-key"
+        case .openclaw:  "openclaw-gateway-token"
         }
     }
 }

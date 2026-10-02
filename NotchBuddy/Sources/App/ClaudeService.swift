@@ -71,6 +71,7 @@ final class KeychainStore: @unchecked Sendable {
         "stripe-api-key",
         "calcom-api-key",
         "notion-api-key",
+        "openclaw-gateway-url", "openclaw-gateway-token",
     ]
 
     private init() {
@@ -151,6 +152,109 @@ final class ClaudeService {
         }
     }
 
+    // MARK: - OpenClaw (through openclaw-bridge's local chat socket)
+
+    nonisolated static let openClawChatSocket = FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent("Library/Application Support/NotchBuddy/openclaw-chat.sock").path
+
+    /// Sends one JSON request line to openclaw-bridge and calls `onEvent` for each JSON line it answers,
+    /// until the bridge closes the connection. Blocking — call off the main thread.
+    nonisolated static func openClawBridge(_ request: [String: Any], onEvent: ([String: Any]) -> Void) throws {
+        let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+        guard fd >= 0 else { throw bridgeError("socket() failed") }
+        defer { close(fd) }
+        var addr = sockaddr_un()
+        addr.sun_family = sa_family_t(AF_UNIX)
+        let path = Array(openClawChatSocket.utf8CString)
+        guard path.count <= MemoryLayout.size(ofValue: addr.sun_path) else { throw bridgeError("Socket path too long") }
+        withUnsafeMutableBytes(of: &addr.sun_path) { $0.copyBytes(from: path.map { UInt8(bitPattern: $0) }) }
+        let ok = withUnsafePointer(to: &addr) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                connect(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) == 0
+            }
+        }
+        guard ok else { throw bridgeError("OpenClaw bridge not running — start openclaw-bridge (node bridge.mjs).") }
+        var line = try JSONSerialization.data(withJSONObject: request)
+        line.append(UInt8(ascii: "\n"))
+        _ = line.withUnsafeBytes { send(fd, $0.baseAddress, $0.count, 0) }
+
+        var pending = Data()
+        var buf = [UInt8](repeating: 0, count: 8192)
+        while true {
+            let n = recv(fd, &buf, buf.count, 0)
+            if n <= 0 { break }
+            pending.append(contentsOf: buf[0..<n])
+            while let nl = pending.firstIndex(of: UInt8(ascii: "\n")) {
+                let chunk = pending[pending.startIndex..<nl]
+                pending.removeSubrange(pending.startIndex...nl)
+                if let obj = try? JSONSerialization.jsonObject(with: chunk) as? [String: Any] { onEvent(obj) }
+            }
+        }
+    }
+
+    nonisolated private static func bridgeError(_ message: String) -> NSError {
+        NSError(domain: "OpenClaw", code: 0, userInfo: [NSLocalizedDescriptionKey: message])
+    }
+
+    /// Lists the Gateway's agents (default agent first) through the bridge.
+    static func fetchOpenClawModels() async -> [(id: String, label: String)] {
+        await Task.detached {
+            var ids: [String] = []
+            try? openClawBridge(["op": "agents"]) { event in
+                guard let agents = event["agents"] as? [String] else { return }
+                let def = event["defaultId"] as? String ?? ""
+                ids = agents.filter { $0 == def } + agents.filter { $0 != def }
+            }
+            return ids.map { (id: $0, label: $0) }
+        }.value
+    }
+
+    /// Notch chat with an OpenClaw agent: persistent `agent:<id>:coucou` session on the Gateway,
+    /// streamed into one assistant bubble. No local history — the Gateway keeps it (/new resets).
+    func chatOpenClaw(query: String, state: AppState) async {
+        let agentId = state.openClawChatModel
+        openClawBubble = nil
+        do {
+            try await Task.detached {
+                try Self.openClawBridge(["op": "send", "agentId": agentId, "message": query]) { event in
+                    let type = event["type"] as? String ?? ""
+                    let text = event["text"] as? String ?? event["message"] as? String ?? ""
+                    // main.async keeps events in order (a Task per event would not)
+                    DispatchQueue.main.async { MainActor.assumeIsolated { self.applyOpenClawEvent(type, text, state: state) } }
+                }
+            }.value
+        } catch {
+            await showError(error.localizedDescription, state: state)
+        }
+    }
+
+    private var openClawBubble: UUID?
+
+    private func applyOpenClawEvent(_ type: String, _ raw: String, state: AppState) {
+        switch type {
+        case "delta", "final":
+            let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let id = openClawBubble, let i = state.chatHistory.firstIndex(where: { $0.id == id }) {
+                state.chatHistory[i].content = text
+            } else {
+                let msg = ChatMessage(role: .assistant, content: text)
+                openClawBubble = msg.id
+                state.chatHistory.append(msg)
+            }
+            if type == "final" {
+                state.stateOverride = nil
+                state.view = .prompt
+                NotificationCenter.default.post(name: .triggerEmote, object: BotEmote.happy)
+            }
+        case "error":
+            state.stateOverride = .error
+            state.noteMessage = raw.isEmpty ? "OpenClaw error" : raw
+            state.view = .note
+        default:
+            break
+        }
+    }
+
     /// Fetches chat models from the OpenAI API, sorted newest-first by creation date.
     /// Excludes non-chat model families.
     static func fetchOpenAIModels(apiKey: String) async -> [(id: String, label: String)] {
@@ -204,6 +308,10 @@ final class ClaudeService {
     // MARK: - Chat (multi-turn, natural text + web search)
 
     func chat(query: String, context: PromptContext?, state: AppState) async {
+        if state.chatProvider == .openclaw {
+            await chatOpenClaw(query: query, state: state)
+            return
+        }
         guard state.chatProvider == .anthropic else {
             await chatOpenAICompatible(query: query, context: context, state: state)
             return
@@ -265,7 +373,7 @@ final class ClaudeService {
         switch provider {
         case .google:  baseURL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
         case .openai:  baseURL = "https://api.openai.com/v1/chat/completions"
-        case .anthropic: return
+        case .anthropic, .openclaw: return
         }
         guard let url = URL(string: baseURL) else { return }
 

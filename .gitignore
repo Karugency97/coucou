@@ -18,3 +18,6 @@ DerivedData/
 # Local only (never published)
 .claude/
 _prive/
+
+# OpenClaw bridge deps
+openclaw-bridge/node_modules/
