@@ -11,6 +11,9 @@ LABEL="fr.karugency.coucou-openclaw"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 LOG="$HOME/Library/Logs/NotchBuddy/openclaw-bridge.log"
 
+# 0. Bridge mapping tests — stop before installing anything if they fail.
+(cd "$REPO/openclaw-bridge" && node --test >/dev/null) || { echo "openclaw-bridge tests failed (cd openclaw-bridge && npm test)"; exit 1; }
+
 # 1. App — ad-hoc signature: no Developer ID needed, but the build only runs on this Mac.
 cd "$REPO/NotchBuddy"
 xcodegen >/dev/null
@@ -34,7 +37,7 @@ done
 [ -n "$NODE" ] || { echo "Node >= 22.19 not found (brew install node)"; exit 1; }
 
 mkdir -p "$BRIDGE_DIR" "$(dirname "$LOG")"
-cp "$REPO/openclaw-bridge/"{bridge.mjs,package.json,package-lock.json} "$BRIDGE_DIR/"
+cp "$REPO/openclaw-bridge/"{bridge.mjs,events.mjs,package.json,package-lock.json} "$BRIDGE_DIR/"
 (cd "$BRIDGE_DIR" && PATH="$(dirname "$NODE"):$PATH" npm ci --omit=dev --silent)
 echo "✓ $BRIDGE_DIR (node $("$NODE" --version))"
 

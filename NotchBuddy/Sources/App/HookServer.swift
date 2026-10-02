@@ -443,6 +443,14 @@ final class HookServer: @unchecked Sendable {
             state.openClawFailing = payload["failing"] as? [String] ?? []
             if ok { clearPillBadge(id: agentId) } else { setPillBadge(id: agentId, badge: .error) }
 
+        case "OpenClawHeadline":
+            // Live "what it's doing" from the Gateway observer — only on a pill that is already running.
+            if let headline = payload["headline"] as? String, !headline.isEmpty,
+               state.tasks.contains(where: { $0.id == agentId }),
+               state.tasks.first(where: { $0.id == agentId })?.steps.last != headline {
+                appendStep(id: agentId, step: headline)
+            }
+
         case "OpenClawQuestionResolved":
             if state.pendingQuestion?.requestId == payload["question_id"] as? String {
                 dismissQuestionCard(note: "Answered in OpenClaw.")

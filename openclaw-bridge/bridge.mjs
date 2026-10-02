@@ -5,6 +5,7 @@
 //   • exec / plugin approval requests                 → Coucou approval card, decision → approval resolve
 //   • agent questions (question.requested)            → Coucou question card, answer → question.resolve
 //   • status line for the OpenClaw pill (health, today's cost, cron) + pairing/offline notices
+//   • live headline per agent (session.observer)       → step on the agent's pill
 //   • notch chat: local socket openclaw-chat.sock ⇄ chat.send / chat events (persistent agent:<id>:coucou session)
 
 import { GatewayClient } from "@openclaw/gateway-client";
@@ -15,6 +16,16 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
+import {
+  agentEventToCoucou, approvalDecision, approvalToCoucou, historyTurns,
+  observerToCoucou, questionToCoucou, statusSummary, textOf,
+} from "./events.mjs";
+
+// Timestamped log lines (launchd appends stdout/stderr to openclaw-bridge.log).
+for (const level of ["log", "error"]) {
+  const write = console[level].bind(console);
+  console[level] = (...args) => write(new Date().toISOString(), ...args);
+}
 
 const APP_DIR = path.join(os.homedir(), "Library/Application Support/NotchBuddy");
 const SOCK = process.env.COUCOU_SOCK ?? path.join(APP_DIR, "nb.sock");
@@ -85,53 +96,27 @@ function askCoucou(payload) {
   return { decision, cancel: () => s.destroy() };
 }
 
-// ── Event mapping ──
-const agentOf = (p) => p.agentId ?? /^agent:([^:]+):/.exec(p.sessionKey ?? "")?.[1] ?? "main";
-// openclaw_agent → one pill per Gateway agent in Coucou (status/resolved events without it go to the OpenClaw pill)
-const base = (p) => ({ session_id: p.sessionKey, cwd: `/openclaw/${agentOf(p)}`, openclaw_agent: agentOf(p) });
-
-// OpenClaw tool ids → names Coucou already knows how to label (frenchStep).
-const TOOL_NAMES = { exec: "Bash", read: "Read", write: "Write", edit: "Edit", apply_patch: "Edit",
-  web_fetch: "WebFetch", web_search: "WebSearch", spawn_agent: "Task", ls: "LS", grep: "Grep", glob: "Glob", find: "Glob" };
-
+// ── Gateway events → Coucou ──
 function onAgentEvent(p) {
-  if (!p?.sessionKey || p.isHeartbeat) return;
-  const d = p.data ?? {};
-  if (p.stream === "lifecycle") {
-    const name = { start: "UserPromptSubmit", end: "Stop", error: "StopFailure" }[d.phase];
-    if (name) sendToCoucou({ ...base(p), hook_event_name: name });
-  } else if (p.stream === "tool") {
-    const tool_name = TOOL_NAMES[d.name] ?? d.name ?? "Tool";
-    if (d.phase === "start") sendToCoucou({ ...base(p), hook_event_name: "PreToolUse", tool_name, tool_input: d.args ?? {} });
-    else if (d.phase === "result") sendToCoucou({ ...base(p), hook_event_name: d.isError ? "PostToolUseFailure" : "PostToolUse", tool_name, tool_input: d.args ?? {} });
-  }
+  const payload = agentEventToCoucou(p);
+  if (payload) sendToCoucou(payload);
 }
 
 const pending = new Map(); // approval id → cancel()
 
 async function onApprovalRequested(kind, p) {
-  const id = p?.id;
-  const r = p?.request ?? {};
-  if (!id || pending.has(id)) return;
-  const toolInput = kind === "exec"
-    ? { command: r.command ?? r.commandPreview ?? "(command)" }
-    : { command: [r.title, r.description].filter(Boolean).join(" — ") || "Plugin approval" };
-  const ask = askCoucou({
-    session_id: r.sessionKey ?? id,
-    cwd: `/openclaw/${r.agentId ?? agentOf(r)}`,
-    openclaw_agent: r.agentId ?? agentOf(r),
-    tool_name: kind === "exec" ? "Bash" : (r.toolName ?? "Plugin"),
-    tool_input: toolInput,
-  });
-  pending.set(id, ask.cancel);
+  const payload = approvalToCoucou(kind, p);
+  if (!payload || pending.has(p.id)) return;
+  const ask = askCoucou(payload);
+  pending.set(p.id, ask.cancel);
   const answer = await ask.decision;
-  if (!pending.delete(id)) return; // resolved elsewhere meanwhile
-  const decision = { allow: "allow-once", always: "allow-always", deny: "deny" }[answer];
+  if (!pending.delete(p.id)) return; // resolved elsewhere meanwhile
+  const decision = approvalDecision(answer);
   if (!decision) return; // "ask" / no answer → leave it to the other OpenClaw approval surfaces
   try {
-    await client.request(`${kind}.approval.resolve`, { id, decision });
+    await client.request(`${kind}.approval.resolve`, { id: p.id, decision });
   } catch (e) {
-    console.error(`resolve ${id} failed: ${e.message}`);
+    console.error(`resolve ${p.id} failed: ${e.message}`);
   }
 }
 
@@ -140,25 +125,14 @@ function onApprovalResolved(p) {
   if (cancel) { pending.delete(p.id); cancel(); } // closes the socket → Coucou shows "Handled in OpenClaw."
 }
 
-// Secret questions (API keys…) stay in OpenClaw's own UI — never route secrets through the notch.
-// ponytail: multiSelect is answered with one choice and "Other" free text only when there are no options.
 function onQuestionRequested(p) {
-  const qs = p?.questions ?? [];
-  if (!p?.id || !qs.length || qs.some((q) => q.isSecret)) return;
-  sendToCoucou({
-    hook_event_name: "OpenClawQuestion",
-    session_id: p.sessionKey ?? p.id,
-    cwd: `/openclaw/${p.agentId ?? agentOf(p)}`,
-    openclaw_agent: p.agentId ?? agentOf(p),
-    question: {
-      id: p.id,
-      items: qs.map((q) => ({
-        id: q.questionId,
-        text: q.question,
-        options: (q.options ?? []).map((o) => o.label),
-      })),
-    },
-  });
+  const payload = questionToCoucou(p);
+  if (payload) sendToCoucou(payload);
+}
+
+function onObserver(p) {
+  const payload = observerToCoucou(p);
+  if (payload) sendToCoucou(payload);
 }
 
 // ── Status line shown on the OpenClaw pill ──
@@ -174,14 +148,8 @@ async function refreshStatus() {
       client.request("cron.status", {}),
       client.request("cron.list", { compact: true, lastRunStatus: "error", limit: 200 }),
     ]);
-    const today = cost.daily?.at(-1)?.totalCost ?? 0; // daily is oldest → newest, last entry = today
-    const failingN = failing.jobs?.length ?? 0;
-    pushStatus(health.ok && failingN === 0, [
-      health.ok ? "Gateway OK" : "Gateway unhealthy",
-      `$${today.toFixed(2)} today`,
-      `${cron.jobs ?? 0} cron` + (failingN ? ` · ${failingN} failing` : ""),
-    ].join(" · "), (failing.jobs ?? []).map((j) =>
-      `${j.displayName ?? j.name} — ${j.lastRunError ?? "error"}` + (j.lastRunAt ? ` (${j.lastRunAt.slice(0, 10)})` : "")));
+    const s = statusSummary({ health, cost, cron, failing });
+    pushStatus(s.ok, s.summary, s.failing);
   } catch (e) {
     console.error(`status: ${e.message}`);
   }
@@ -230,12 +198,16 @@ const client = new GatewayClient({
     console.log(`Connected to ${url} as device ${state.deviceId.slice(0, 12)}…`);
     // Registers this connection for session.tool events of every session.
     try { await client.request("sessions.subscribe", {}); } catch (e) { console.error(`sessions.subscribe: ${e.message}`); }
+    // Live per-session headlines (session.observer events).
+    try { await client.request("sessions.observer.visibility", { visible: true }); } catch (e) { console.error(`observer: ${e.message}`); }
     await refreshStatus();
     await backfill();
   },
-  onClose: (_code, _reason, info) => {
+  onClose: (code, reason, info) => {
+    console.error(`Closed: code=${code} reason=${reason || "-"} phase=${info?.phase ?? "?"}`);
     if (info?.phase === "post-hello") pushStatus(false, "Gateway offline · reconnecting…");
   },
+  onGap: ({ expected, received }) => console.error(`Event gap: expected seq ${expected}, got ${received}`),
   // Paused (e.g. pairing pending): exit so launchd restarts us and we try again.
   onReconnectPaused: () => setTimeout(() => process.exit(1), 120_000),
   onConnectError: (e) => {
@@ -255,6 +227,7 @@ const client = new GatewayClient({
       case "exec.approval.requested": return void onApprovalRequested("exec", evt.payload);
       case "plugin.approval.requested": return void onApprovalRequested("plugin", evt.payload);
       case "chat": return onChatEvent(evt.payload);
+      case "session.observer": return onObserver(evt.payload);
       case "question.requested": return onQuestionRequested(evt.payload);
       case "question.resolved": return sendToCoucou({ hook_event_name: "OpenClawQuestionResolved", question_id: evt.payload?.id });
       case "exec.approval.resolved":
@@ -269,14 +242,6 @@ const client = new GatewayClient({
 //   {"op":"history","agentId":"main"}         → {"type":"history","messages":[{"role":"user"|"assistant","text":…}]} (last 30)
 //   {"op":"abort","agentId":"main"}           → {"type":"ok"} (the running send then ends with "final" + text so far)
 const chats = new Map(); // sessionKey → { text, write, end }
-
-function textOf(message) {
-  if (typeof message === "string") return message;
-  const c = message?.content;
-  if (typeof c === "string") return c;
-  if (Array.isArray(c)) return c.filter((b) => b?.type === "text").map((b) => b.text).join("");
-  return "";
-}
 
 function onChatEvent(p) {
   const chat = chats.get(p?.sessionKey);
@@ -314,11 +279,7 @@ async function handleChatRequest(req, conn) {
   }
   if (req.op === "history") {
     const r = await client.request("chat.history", { sessionKey, limit: 200 });
-    const messages = (r.messages ?? [])
-      .filter((m) => m.role === "user" || m.role === "assistant")
-      .map((m) => ({ role: m.role, text: textOf(m).trim() }))
-      .filter((m) => m.text) // drops thinking / tool-call-only turns
-      .slice(-30);
+    const messages = historyTurns(r.messages);
     return conn.end(JSON.stringify({ type: "history", messages }) + "\n");
   }
   if (req.op === "abort") {
@@ -355,5 +316,5 @@ net.createServer((conn) => {
 }).listen(CHAT_SOCK, () => fs.chmodSync(CHAT_SOCK, 0o600));
 
 client.start();
-setInterval(refreshStatus, 5 * 60_000);
+setInterval(refreshStatus, 5 * 60_000); // errors while disconnected are logged and skipped
 for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, () => { client.stop(); process.exit(0); });
