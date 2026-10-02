@@ -252,6 +252,7 @@ final class AppState: ObservableObject {
     // OpenClaw Gateway status line pushed by openclaw-bridge (health · today's cost · cron)
     @Published var openClawStatus: String? = nil
     @Published var openClawOK = true
+    @Published var openClawFailing: [String] = []  // "job — error (date)" for failing cron jobs
 
     // MARK: - Init (loads persisted settings)
 

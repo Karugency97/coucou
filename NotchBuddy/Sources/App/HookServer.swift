@@ -440,6 +440,7 @@ final class HookServer: @unchecked Sendable {
             let ok = payload["ok"] as? Bool ?? true
             state.openClawStatus = payload["summary"] as? String
             state.openClawOK = ok
+            state.openClawFailing = payload["failing"] as? [String] ?? []
             if ok { clearPillBadge(id: agentId) } else { setPillBadge(id: agentId, badge: .error) }
 
         case "OpenClawQuestionResolved":

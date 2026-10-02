@@ -1,5 +1,6 @@
 import Foundation
 import Security
+import UniformTypeIdentifiers
 
 // MARK: - Keychain helpers
 
@@ -192,6 +193,14 @@ final class ClaudeService {
         }
     }
 
+    /// The Gateway's web Control UI (ws(s):// URL from Settings → http(s)://).
+    static var openClawWebURL: URL? {
+        guard var s = KeychainStore.shared.get("openclaw-gateway-url")?
+            .trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty else { return nil }
+        if s.hasPrefix("wss://") { s = "https://" + s.dropFirst(6) } else if s.hasPrefix("ws://") { s = "http://" + s.dropFirst(5) }
+        return URL(string: s)
+    }
+
     nonisolated private static func bridgeError(_ message: String) -> NSError {
         NSError(domain: "OpenClaw", code: 0, userInfo: [NSLocalizedDescriptionKey: message])
     }
@@ -211,12 +220,38 @@ final class ClaudeService {
 
     /// Notch chat with an OpenClaw agent: persistent `agent:<id>:coucou` session on the Gateway,
     /// streamed into one assistant bubble. No local history — the Gateway keeps it (/new resets).
-    func chatOpenClaw(query: String, state: AppState) async {
+    func chatOpenClaw(query: String, context: PromptContext?, state: AppState) async {
         let agentId = state.openClawChatModel
+        var message = query
+        var file: (mime: String, name: String, base64: String)?
+        switch context {
+        case .window(let app, let title, let url)?:
+            message = "Context — App: \(app), Window: \(title)" + (url.map { ", URL: \($0)" } ?? "") + "\n\n" + query
+        case .file(let name, let fileURL)?:
+            guard let fileURL, let data = try? Data(contentsOf: fileURL) else {
+                await showError("Can't read \(name).", state: state); return
+            }
+            guard data.count <= 15_000_000 else {
+                await showError("\(name) is too large (15 MB max).", state: state); return
+            }
+            let mime = UTType(filenameExtension: fileURL.pathExtension)?.preferredMIMEType ?? "application/octet-stream"
+            file = (mime, name, data.base64EncodedString())
+        case nil:
+            break
+        }
+        // Sent once: the Gateway session keeps the file / window context for the next turns.
+        if context != nil { state.promptContext = nil }
         openClawBubble = nil
         do {
-            try await Task.detached {
-                try Self.openClawBridge(["op": "send", "agentId": agentId, "message": query]) { event in
+            try await Task.detached { [message, file] in
+                var request: [String: Any] = ["op": "send", "agentId": agentId, "message": message]
+                if let file {
+                    request["attachments"] = [[
+                        "type": file.mime.hasPrefix("image/") ? "image" : "file",
+                        "mimeType": file.mime, "fileName": file.name, "content": file.base64,
+                    ]]
+                }
+                try Self.openClawBridge(request) { event in
                     let type = event["type"] as? String ?? ""
                     let text = event["text"] as? String ?? event["message"] as? String ?? ""
                     // main.async keeps events in order (a Task per event would not)
@@ -332,7 +367,7 @@ final class ClaudeService {
 
     func chat(query: String, context: PromptContext?, state: AppState) async {
         if state.chatProvider == .openclaw {
-            await chatOpenClaw(query: query, state: state)
+            await chatOpenClaw(query: query, context: context, state: state)
             return
         }
         guard state.chatProvider == .anthropic else {

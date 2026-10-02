@@ -1469,6 +1469,22 @@ struct IntegrationCardView: View {
                             .buttonStyle(.plain)
                         }
                         #endif
+                    } else if task.id == "agent_openclaw" {
+                        if let url = ClaudeService.openClawWebURL {
+                            Button("Open OpenClaw") { NSWorkspace.shared.open(url) }
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundColor(Color(hex: task.color).opacity(0.85))
+                                .buttonStyle(.plain)
+                        }
+                        if !appState.openClawFailing.isEmpty {
+                            Button("Cron errors") {
+                                appState.noteMessage = appState.openClawFailing.joined(separator: "\n")
+                                appState.view = .note
+                            }
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(Color(hex: "#F4505E").opacity(0.85))
+                            .buttonStyle(.plain)
+                        }
                     } else if task.id == "agent_codex" {
                         #if !APPSTORE
                         if let url = NSWorkspace.shared.urlForApplication(

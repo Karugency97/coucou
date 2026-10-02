@@ -162,8 +162,8 @@ function onQuestionRequested(p) {
 }
 
 // ── Status line shown on the OpenClaw pill ──
-function pushStatus(ok, summary) {
-  sendToCoucou({ hook_event_name: "OpenClawStatus", ok, summary });
+function pushStatus(ok, summary, failing = []) {
+  sendToCoucou({ hook_event_name: "OpenClawStatus", ok, summary, failing });
 }
 
 async function refreshStatus() {
@@ -180,7 +180,8 @@ async function refreshStatus() {
       health.ok ? "Gateway OK" : "Gateway unhealthy",
       `$${today.toFixed(2)} today`,
       `${cron.jobs ?? 0} cron` + (failingN ? ` · ${failingN} failing` : ""),
-    ].join(" · "));
+    ].join(" · "), (failing.jobs ?? []).map((j) =>
+      `${j.displayName ?? j.name} — ${j.lastRunError ?? "error"}` + (j.lastRunAt ? ` (${j.lastRunAt.slice(0, 10)})` : "")));
   } catch (e) {
     console.error(`status: ${e.message}`);
   }
@@ -264,7 +265,7 @@ const client = new GatewayClient({
 
 // ── Notch chat: Coucou writes one JSON request line, the bridge answers with JSON event lines ──
 //   {"op":"agents"}                         → {"type":"agents","agents":[…],"defaultId":"main"}
-//   {"op":"send","agentId":"main","message":"…"} → {"type":"delta","text":<cumulative>}… then {"type":"final","text":…} | {"type":"error","message":…}
+//   {"op":"send","agentId":"main","message":"…","attachments":[{type,mimeType,fileName,content(base64)}]?} → {"type":"delta","text":<cumulative>}… then {"type":"final","text":…} | {"type":"error","message":…}
 //   {"op":"history","agentId":"main"}         → {"type":"history","messages":[{"role":"user"|"assistant","text":…}]} (last 30)
 //   {"op":"abort","agentId":"main"}           → {"type":"ok"} (the running send then ends with "final" + text so far)
 const chats = new Map(); // sessionKey → { text, write, end }
@@ -322,7 +323,10 @@ async function handleChatRequest(req, conn) {
   const chat = { text: "", write, end: (obj) => { chats.delete(sessionKey); write(obj); conn.end(); } };
   chats.set(sessionKey, chat);
   conn.on("close", () => { if (chats.get(sessionKey) === chat) chats.delete(sessionKey); });
-  await client.request("chat.send", { sessionKey, agentId, message: req.message, idempotencyKey: crypto.randomUUID() });
+  await client.request("chat.send", {
+    sessionKey, agentId, message: req.message, idempotencyKey: crypto.randomUUID(),
+    ...(Array.isArray(req.attachments) && req.attachments.length ? { attachments: req.attachments } : {}),
+  });
 }
 
 fs.rmSync(CHAT_SOCK, { force: true });
