@@ -1032,7 +1032,7 @@ struct ChatBubble: View {
                     .background(Color.white.opacity(0.13))
                     .clipShape(RoundedRectangle(cornerRadius: 12))
             } else {
-                Text(message.content)
+                Text(Self.markdown(message.content))
                     .font(.system(size: 12.5))
                     .foregroundColor(Color(hex: "#B0B5BE"))
                     .fixedSize(horizontal: false, vertical: true)
@@ -1040,6 +1040,25 @@ struct ChatBubble: View {
                 Spacer(minLength: 8)
             }
         }
+    }
+}
+
+extension ChatBubble {
+    /// Assistant replies can be markdown (OpenClaw agents): inline styles (bold, italic, `code`, links)
+    /// via AttributedString; headings become bold lines, list markers "•", code fences are dropped.
+    /// ponytail: no table / code-block layout — add a real renderer if replies need it.
+    static func markdown(_ text: String) -> AttributedString {
+        let lines = text.components(separatedBy: "\n").compactMap { line -> String? in
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("```") { return nil }
+            if let r = trimmed.range(of: #"^#{1,6}\s+"#, options: .regularExpression) {
+                return "**\(trimmed[r.upperBound...])**"
+            }
+            return line.replacingOccurrences(of: #"^(\s*)[-*+]\s+"#, with: "$1• ", options: .regularExpression)
+        }
+        let source = lines.joined(separator: "\n")
+        let options = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+        return (try? AttributedString(markdown: source, options: options)) ?? AttributedString(text)
     }
 }
 
