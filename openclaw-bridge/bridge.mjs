@@ -4,6 +4,7 @@
 //   • live agent activity (lifecycle + tool events)  → Coucou hook socket (coucou_agent "openclaw")
 //   • exec / plugin approval requests                 → Coucou approval card, decision → approval resolve
 //   • agent questions (question.requested)            → Coucou question card, answer → question.resolve
+//   • status line for the OpenClaw pill (health, today's cost, cron) + pairing/offline notices
 //   • notch chat: local socket openclaw-chat.sock ⇄ chat.send / chat events (persistent agent:<id>:coucou session)
 
 import { GatewayClient } from "@openclaw/gateway-client";
@@ -157,6 +158,48 @@ function onQuestionRequested(p) {
   });
 }
 
+// ── Status line shown on the OpenClaw pill ──
+function pushStatus(ok, summary) {
+  sendToCoucou({ hook_event_name: "OpenClawStatus", ok, summary });
+}
+
+async function refreshStatus() {
+  try {
+    const [health, cost, cron, failing] = await Promise.all([
+      client.request("health", {}),
+      client.request("usage.cost", {}),
+      client.request("cron.status", {}),
+      client.request("cron.list", { compact: true, lastRunStatus: "error", limit: 200 }),
+    ]);
+    const today = cost.daily?.at(-1)?.totalCost ?? 0; // daily is oldest → newest, last entry = today
+    const failingN = failing.jobs?.length ?? 0;
+    pushStatus(health.ok && failingN === 0, [
+      health.ok ? "Gateway OK" : "Gateway unhealthy",
+      `$${today.toFixed(2)} today`,
+      `${cron.jobs ?? 0} cron` + (failingN ? ` · ${failingN} failing` : ""),
+    ].join(" · "));
+  } catch (e) {
+    console.error(`status: ${e.message}`);
+  }
+}
+
+// Requests already pending when the bridge (re)connects.
+async function backfill() {
+  // ponytail: list items assumed to carry the same { id, request } shape as the *.requested events
+  for (const kind of ["exec", "plugin"]) {
+    try {
+      const list = await client.request(`${kind}.approval.list`, {});
+      for (const a of (Array.isArray(list) ? list : list?.approvals ?? [])) {
+        void onApprovalRequested(kind, a.request ? a : { id: a.id, request: a });
+      }
+    } catch (e) { console.error(`${kind}.approval.list: ${e.message}`); }
+  }
+  try {
+    const { questions = [] } = await client.request("question.list", {});
+    for (const q of questions) if (q.status === "pending") onQuestionRequested(q);
+  } catch (e) { console.error(`question.list: ${e.message}`); }
+}
+
 // ── Gateway client ──
 const client = new GatewayClient({
   url,
@@ -183,11 +226,19 @@ const client = new GatewayClient({
     console.log(`Connected to ${url} as device ${state.deviceId.slice(0, 12)}…`);
     // Registers this connection for session.tool events of every session.
     try { await client.request("sessions.subscribe", {}); } catch (e) { console.error(`sessions.subscribe: ${e.message}`); }
+    await refreshStatus();
+    await backfill();
   },
+  onClose: (_code, _reason, info) => {
+    if (info?.phase === "post-hello") pushStatus(false, "Gateway offline · reconnecting…");
+  },
+  // Paused (e.g. pairing pending): exit so launchd restarts us and we try again.
+  onReconnectPaused: () => setTimeout(() => process.exit(1), 120_000),
   onConnectError: (e) => {
     const d = e.details ?? {};
     if (d.code === "PAIRING_REQUIRED" || e.gatewayCode === "PAIRING_REQUIRED" || d.requestId) {
       console.error(`Pairing required. On the Gateway host run:\n  openclaw devices list\n  openclaw devices approve ${d.requestId ?? "<requestId>"}`);
+      pushStatus(false, `Pairing needed · openclaw devices approve ${d.requestId ?? "<id>"}`);
     } else {
       console.error(`Connect error: ${e.message}`);
     }
@@ -273,4 +324,5 @@ net.createServer((conn) => {
 }).listen(CHAT_SOCK, () => fs.chmodSync(CHAT_SOCK, 0o600));
 
 client.start();
+setInterval(refreshStatus, 5 * 60_000);
 for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, () => { client.stop(); process.exit(0); });

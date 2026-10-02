@@ -430,6 +430,12 @@ final class HookServer: @unchecked Sendable {
             withAnimation(.spring(response: 0.5, dampingFraction: 0.72)) { state.focusId = agentId }
             expandIfNeeded(to: .question)
 
+        case "OpenClawStatus":
+            let ok = payload["ok"] as? Bool ?? true
+            state.openClawStatus = payload["summary"] as? String
+            state.openClawOK = ok
+            if ok { clearPillBadge(id: agentId) } else { setPillBadge(id: agentId, badge: .error) }
+
         case "OpenClawQuestionResolved":
             if state.pendingQuestion?.requestId == payload["question_id"] as? String {
                 dismissQuestionCard(note: "Answered in OpenClaw.")

@@ -7,6 +7,7 @@ Shows an OpenClaw Gateway (local or on a VPS) in the notch:
 | Live sessions (thinking, tools, finished) | `bridge.mjs` → Coucou socket, pill **OpenClaw** |
 | Approvals (exec + plugin) | `bridge.mjs` → Allow / Always / Deny card → `exec.approval.resolve` / `plugin.approval.resolve` |
 | Agent questions | `bridge.mjs` → question card (options or free text, up to 3 questions in a row) → `question.resolve`. Secret questions stay in OpenClaw |
+| Status | OpenClaw pill card: `Gateway OK · $0.42 today · 20 cron · 1 failing` (health, `usage.cost`, `cron.status`/`cron.list`), every 5 min; red dot + badge when unhealthy, offline, pairing needed or a cron job failed |
 | Chat | Coucou → `openclaw-chat.sock` → `chat.send`, streamed; one persistent `agent:<id>:coucou` session per agent (provider **OpenClaw** in the model picker, type `/new` to reset) |
 
 GitHub build only (the App Store build has no approval cards for third-party agents).
@@ -69,5 +70,6 @@ launchctl load ~/Library/LaunchAgents/fr.karugency.coucou-openclaw.plist
 
 - Approval answered elsewhere (Control UI, Telegram, `/approve`) → the card closes with "Handled in OpenClaw."
 - No click within ~2 min → the card closes, the approval stays pending in OpenClaw.
-- Approvals already pending when the bridge starts are not backfilled.
+- Approvals and questions already pending when the bridge connects are picked up (`*.approval.list`, `question.list`).
+- Pairing pending: the pill shows the `openclaw devices approve <id>` to run; the bridge exits after 2 min so launchd retries.
 - Heartbeat runs are ignored (they would flood the pill).

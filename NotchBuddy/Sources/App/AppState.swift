@@ -249,6 +249,10 @@ final class AppState: ObservableObject {
     @Published var pendingApproval: ApprovalInfo? = nil
     @Published var pendingQuestion: QuestionInfo? = nil
 
+    // OpenClaw Gateway status line pushed by openclaw-bridge (health · today's cost · cron)
+    @Published var openClawStatus: String? = nil
+    @Published var openClawOK = true
+
     // MARK: - Init (loads persisted settings)
 
     private init() {

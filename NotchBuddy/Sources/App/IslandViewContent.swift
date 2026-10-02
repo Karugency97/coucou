@@ -1286,6 +1286,7 @@ struct IntegrationCardView: View {
                    : task.id == "integration_calcom"  ? appState.calcomError
                    : nil
         if svcErr != nil { return Color(hex: "#F4505E") }
+        if task.id == "agent_openclaw", appState.openClawStatus != nil, !appState.openClawOK { return Color(hex: "#F4505E") }
         return isConfigured ? Color(hex: "#22C55E") : Color(hex: "#F4505E")
     }
 
@@ -1295,6 +1296,7 @@ struct IntegrationCardView: View {
                    : task.id == "integration_calcom"  ? appState.calcomError
                    : nil
         if let err = svcErr { return err }
+        if task.id == "agent_openclaw", let status = appState.openClawStatus { return status }
         let isHooks = task.id == "agent_gemini" || task.id == "agent_antigravity"
         let isAI    = task.id == "ai_anthropic" || task.id == "ai_google" || task.id == "ai_openai" || task.id == "ai_openclaw"
         if isConfigured {
