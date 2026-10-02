@@ -97,7 +97,34 @@ function askCoucou(payload) {
 }
 
 // ── Gateway events → Coucou ──
+// Per-session subscriptions while a run is active, so the Gateway produces full observer headlines.
+// Cost: each headline update is a utility-model call on the Gateway (opted in by the user).
+const watched = new Set();
+function watchSession(p, on) {
+  if (!p?.sessionKey || p.isHeartbeat || on === watched.has(p.sessionKey)) return;
+  if (on) watched.add(p.sessionKey); else watched.delete(p.sessionKey);
+  client.request(on ? "sessions.messages.subscribe" : "sessions.messages.unsubscribe",
+    { key: p.sessionKey, ...(p.agentId ? { agentId: p.agentId } : {}) })
+    .catch((e) => console.error(`watch ${p.sessionKey}: ${e.message}`));
+}
+
+// The same tool event can arrive both as "agent" (per-session subscription) and "session.tool".
+const seen = new Set();
+function firstTime(p) {
+  if (p?.runId === undefined || p.seq === undefined) return true;
+  const key = `${p.runId}:${p.seq}:${p.stream}`;
+  if (seen.has(key)) return false;
+  seen.add(key);
+  if (seen.size > 2000) seen.delete(seen.values().next().value); // ponytail: FIFO cap, plenty for a few live runs
+  return true;
+}
+
 function onAgentEvent(p) {
+  if (!firstTime(p)) return;
+  if (p?.stream === "lifecycle") {
+    if (p.data?.phase === "start") watchSession(p, true);
+    else if (p.data?.phase === "end" || p.data?.phase === "error") watchSession(p, false);
+  }
   const payload = agentEventToCoucou(p);
   if (payload) sendToCoucou(payload);
 }
@@ -195,6 +222,7 @@ const client = new GatewayClient({
     logDebug: DEBUG ? (m) => console.log(m) : undefined,
   },
   onHelloOk: async () => {
+    watched.clear(); // per-session subscriptions die with the previous connection
     console.log(`Connected to ${url} as device ${state.deviceId.slice(0, 12)}…`);
     // Registers this connection for session.tool events of every session.
     try { await client.request("sessions.subscribe", {}); } catch (e) { console.error(`sessions.subscribe: ${e.message}`); }
