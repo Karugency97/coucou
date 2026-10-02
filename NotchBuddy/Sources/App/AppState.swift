@@ -254,6 +254,11 @@ final class AppState: ObservableObject {
     @Published var openClawOK = true
     @Published var openClawFailing: [String] = []  // "job — error (date)" for failing cron jobs
 
+    #if !APPSTORE
+    @Published var musicPlaying: Bool = false
+    @Published var musicAutomationDenied: Bool = false
+    #endif
+
     // MARK: - Init (loads persisted settings)
 
     private init() {
