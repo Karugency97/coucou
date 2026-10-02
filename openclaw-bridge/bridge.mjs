@@ -304,7 +304,14 @@ async function handleChatRequest(req, conn) {
     return conn.end(JSON.stringify({ type: "agents", defaultId: r.defaultId, agents: r.agents.map((a) => a.id) }) + "\n");
   }
   const agentId = /^[a-z0-9_-]{1,64}$/i.test(req.agentId ?? "") ? req.agentId : "main";
-  const sessionKey = `agent:${agentId}:coucou`;
+  // Current notch session per agent (persisted). /new and /reset need operator.admin on the
+  // Gateway, which the bridge deliberately lacks: they start a fresh session key instead.
+  const sessionKey = state.sessions?.[agentId] ?? `agent:${agentId}:coucou`;
+  if (req.op === "send" && /^\/(new|reset)\s*$/i.test(req.message ?? "")) {
+    state.sessions = { ...state.sessions, [agentId]: `agent:${agentId}:coucou-${Date.now().toString(36)}` };
+    saveState(state);
+    return conn.end(JSON.stringify({ type: "final", text: "New conversation started." }) + "\n");
+  }
   if (req.op === "history") {
     const r = await client.request("chat.history", { sessionKey, limit: 200 });
     const messages = (r.messages ?? [])

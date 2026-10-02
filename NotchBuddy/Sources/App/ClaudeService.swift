@@ -222,6 +222,15 @@ final class ClaudeService {
     /// streamed into one assistant bubble. No local history — the Gateway keeps it (/new resets).
     func chatOpenClaw(query: String, context: PromptContext?, state: AppState) async {
         let agentId = state.openClawChatModel
+        // /new, /reset: the bridge switches this agent to a fresh session — clear the bubble too.
+        if query.range(of: #"^/(new|reset)\s*$"#, options: [.regularExpression, .caseInsensitive]) != nil {
+            let ok = await Task.detached { (try? Self.openClawBridge(["op": "send", "agentId": agentId, "message": "/new"]) { _ in }) != nil }.value
+            guard ok else { await showError("OpenClaw bridge not running.", state: state); return }
+            state.chatHistory = [ChatMessage(role: .assistant, content: "New conversation started.")]
+            state.stateOverride = nil
+            state.view = .prompt
+            return
+        }
         var message = query
         var file: (mime: String, name: String, base64: String)?
         switch context {
