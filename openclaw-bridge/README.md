@@ -43,28 +43,17 @@ openclaw devices approve <requestId>
 The device key and the issued device token live in
 `~/Library/Application Support/NotchBuddy/openclaw-device.json` (mode 600). Delete it to re-pair.
 
-### Run at login (optional)
-
-`~/Library/LaunchAgents/fr.karugency.coucou-openclaw.plist`:
-
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-  <key>Label</key><string>fr.karugency.coucou-openclaw</string>
-  <key>ProgramArguments</key><array>
-    <string>/ABSOLUTE/PATH/TO/node</string>
-    <string>/ABSOLUTE/PATH/TO/openclaw-bridge/bridge.mjs</string>
-  </array>
-  <key>RunAtLoad</key><true/>
-  <key>KeepAlive</key><true/>
-  <key>StandardErrorPath</key><string>/tmp/coucou-openclaw.log</string>
-</dict></plist>
-```
+### Install for daily use
 
 ```bash
-launchctl load ~/Library/LaunchAgents/fr.karugency.coucou-openclaw.plist
+scripts/install-local.sh
 ```
+
+Builds Coucou in Release (ad-hoc signed — runs on this Mac only), installs it in `/Applications`,
+copies the bridge to `~/Library/Application Support/NotchBuddy/openclaw-bridge` (no dependency
+on this checkout) and runs it as the launchd agent `fr.karugency.coucou-openclaw`, restarted
+automatically, logs in `~/Library/Logs/NotchBuddy/openclaw-bridge.log`. Re-run it after each
+`git pull`. Then enable Coucou → Settings → *Launch at startup* once.
 
 ## Behaviour notes
 
