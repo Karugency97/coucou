@@ -71,6 +71,13 @@ struct OverviewView: View {
                                     .lineLimit(1)
                                     .truncationMode(.tail)
                                 Spacer(minLength: 2)
+                                if let openClawAgent = Self.openClawAgentName(agent) {
+                                    Button("Chat") { openOpenClawChat(openClawAgent) }
+                                        .font(.system(size: 11, weight: .medium))
+                                        .foregroundColor(Color(hex: agent.color).opacity(0.9))
+                                        .buttonStyle(.plain)
+                                        .fixedSize()
+                                }
                                 if agent.steps.count > 1 {
                                     Text("\(min(agent.stepIndex + 1, agent.steps.count))/\(agent.steps.count)")
                                         .font(.system(size: 11))
@@ -119,8 +126,21 @@ struct OverviewView: View {
         .onChange(of: state.focusId) { _, _ in showingN8nDetail = false }
     }
 
+    /// Gateway agent id of a per-agent OpenClaw pill (agent_openclaw_<id>), nil otherwise.
+    static func openClawAgentName(_ task: AgentTask) -> String? {
+        task.id.hasPrefix("agent_openclaw_") ? String(task.id.dropFirst("agent_openclaw_".count)) : nil
+    }
+
+    /// Opens the notch chat on this OpenClaw agent (its history loads via PromptView).
+    private func openOpenClawChat(_ agentId: String) {
+        state.openClawChatModel = agentId
+        switchChatProvider(.openclaw)
+        Task { await ClaudeService.shared.loadOpenClawHistory(state: state) }
+    }
+
     private func openAgentTarget(_ task: AgentTask?) {
         guard let task else { return }
+        if let openClawAgent = Self.openClawAgentName(task) { return openOpenClawChat(openClawAgent) }
         switch task.id {
         case "integration_claude":
             let vscodeBundleId = "com.microsoft.VSCode"
