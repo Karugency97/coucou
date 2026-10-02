@@ -230,6 +230,29 @@ final class ClaudeService {
 
     private var openClawBubble: UUID?
 
+    /// Replaces the notch chat with the agent's `agent:<id>:coucou` transcript (last 30 text turns).
+    func loadOpenClawHistory(state: AppState) async {
+        let agentId = state.openClawChatModel
+        let turns: [(role: String, text: String)] = await Task.detached {
+            var out: [(role: String, text: String)] = []
+            try? Self.openClawBridge(["op": "history", "agentId": agentId]) { event in
+                for m in event["messages"] as? [[String: Any]] ?? [] {
+                    if let role = m["role"] as? String, let text = m["text"] as? String { out.append((role, text)) }
+                }
+            }
+            return out
+        }.value
+        // The user may have switched agent/provider or sent a message while we were loading.
+        guard state.chatProvider == .openclaw, state.openClawChatModel == agentId, state.stateOverride == nil else { return }
+        state.chatHistory = turns.map { ChatMessage(role: $0.role == "user" ? .user : .assistant, content: $0.text) }
+    }
+
+    /// Stops the agent's running reply; the bridge then sends the partial text as final.
+    func stopOpenClaw(state: AppState) {
+        let agentId = state.openClawChatModel
+        Task.detached { try? Self.openClawBridge(["op": "abort", "agentId": agentId]) { _ in } }
+    }
+
     private func applyOpenClawEvent(_ type: String, _ raw: String, state: AppState) {
         switch type {
         case "delta", "final":

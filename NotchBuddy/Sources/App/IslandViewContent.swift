@@ -855,13 +855,23 @@ struct PromptView: View {
                         .focused($focused)
                         .onSubmit { sendMessage() }
 
-                    Button(action: sendMessage) {
-                        Image(systemName: "arrow.up")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundColor(Color(hex: "#0B0C0E"))
+                    if state.chatProvider == .openclaw && state.stateOverride == .thinking {
+                        Button { ClaudeService.shared.stopOpenClaw(state: state) } label: {
+                            Image(systemName: "stop.fill")
+                                .font(.system(size: 9, weight: .semibold))
+                                .foregroundColor(Color(hex: "#0B0C0E"))
+                        }
+                        .buttonStyle(SendButtonStyle())
+                        .help("Stop")
+                    } else {
+                        Button(action: sendMessage) {
+                            Image(systemName: "arrow.up")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundColor(Color(hex: "#0B0C0E"))
+                        }
+                        .buttonStyle(SendButtonStyle())
+                        .disabled(text.isEmpty)
                     }
-                    .buttonStyle(SendButtonStyle())
-                    .disabled(text.isEmpty)
                 }
                 .padding(.horizontal, 10).padding(.vertical, 6)
                 .background(Color.white.opacity(0.07))
@@ -874,7 +884,15 @@ struct PromptView: View {
             .padding(.bottom, 14)
         }
         .padding(.bottom, 10)
-        .onAppear { focused = true }
+        .onAppear {
+            focused = true
+            if state.chatProvider == .openclaw && state.chatHistory.isEmpty {
+                Task { await ClaudeService.shared.loadOpenClawHistory(state: state) }
+            }
+        }
+        .onChange(of: state.openClawChatModel) { _, _ in
+            Task { await ClaudeService.shared.loadOpenClawHistory(state: state) }
+        }
         .onChange(of: state.view) { _, view in
             if view == .prompt {
                 state.fetchModelsIfNeeded(for: state.chatProvider)
@@ -883,6 +901,9 @@ struct PromptView: View {
         .onChange(of: state.chatProvider) { _, provider in
             if state.view == .prompt {
                 state.fetchModelsIfNeeded(for: provider)
+            }
+            if provider == .openclaw {
+                Task { await ClaudeService.shared.loadOpenClawHistory(state: state) }
             }
         }
     }

@@ -265,6 +265,8 @@ const client = new GatewayClient({
 // ── Notch chat: Coucou writes one JSON request line, the bridge answers with JSON event lines ──
 //   {"op":"agents"}                         → {"type":"agents","agents":[…],"defaultId":"main"}
 //   {"op":"send","agentId":"main","message":"…"} → {"type":"delta","text":<cumulative>}… then {"type":"final","text":…} | {"type":"error","message":…}
+//   {"op":"history","agentId":"main"}         → {"type":"history","messages":[{"role":"user"|"assistant","text":…}]} (last 30)
+//   {"op":"abort","agentId":"main"}           → {"type":"ok"} (the running send then ends with "final" + text so far)
 const chats = new Map(); // sessionKey → { text, write, end }
 
 function textOf(message) {
@@ -283,8 +285,10 @@ function onChatEvent(p) {
     chat.write({ type: "delta", text: chat.text });
   } else if (p.state === "final") {
     chat.end({ type: "final", text: textOf(p.message) || chat.text });
-  } else if (p.state === "error" || p.state === "aborted") {
-    chat.end({ type: "error", message: p.errorMessage ?? `Run ${p.state}` });
+  } else if (p.state === "aborted") {
+    chat.end({ type: "final", text: (chat.text || textOf(p.message)).trim() + "\n\n_(stopped)_" });
+  } else if (p.state === "error") {
+    chat.end({ type: "error", message: p.errorMessage ?? "Run failed" });
   }
 }
 
@@ -298,9 +302,22 @@ async function handleChatRequest(req, conn) {
     const r = await client.request("agents.list", {});
     return conn.end(JSON.stringify({ type: "agents", defaultId: r.defaultId, agents: r.agents.map((a) => a.id) }) + "\n");
   }
-  if (req.op !== "send" || typeof req.message !== "string") throw new Error("bad request");
   const agentId = /^[a-z0-9_-]{1,64}$/i.test(req.agentId ?? "") ? req.agentId : "main";
   const sessionKey = `agent:${agentId}:coucou`;
+  if (req.op === "history") {
+    const r = await client.request("chat.history", { sessionKey, limit: 200 });
+    const messages = (r.messages ?? [])
+      .filter((m) => m.role === "user" || m.role === "assistant")
+      .map((m) => ({ role: m.role, text: textOf(m).trim() }))
+      .filter((m) => m.text) // drops thinking / tool-call-only turns
+      .slice(-30);
+    return conn.end(JSON.stringify({ type: "history", messages }) + "\n");
+  }
+  if (req.op === "abort") {
+    await client.request("chat.abort", { sessionKey });
+    return conn.end(JSON.stringify({ type: "ok" }) + "\n");
+  }
+  if (req.op !== "send" || typeof req.message !== "string") throw new Error("bad request");
   chats.get(sessionKey)?.end({ type: "error", message: "Superseded by a newer message" });
   const chat = { text: "", write, end: (obj) => { chats.delete(sessionKey); write(obj); conn.end(); } };
   chats.set(sessionKey, chat);
