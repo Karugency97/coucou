@@ -76,3 +76,69 @@ struct SpeakButton: View {
         .help(active ? "Stop" : "Read aloud")
     }
 }
+
+/// Records a voice message for the OpenClaw chat (AAC .m4a, 2 min max). It is sent as an audio
+/// attachment; the Gateway transcribes it (tools.media.audio → ElevenLabs Scribe) before the agent reads it.
+@MainActor
+final class OpenClawDictation: ObservableObject {
+    static let shared = OpenClawDictation()
+
+    @Published private(set) var isRecording = false
+    private var recorder: AVAudioRecorder?
+    private let fileURL = FileManager.default.temporaryDirectory.appendingPathComponent("coucou-voice.m4a")
+
+    func toggle(state: AppState) {
+        if isRecording { finish(state: state) } else { start(state: state) }
+    }
+
+    private func start(state: AppState) {
+        AVCaptureDevice.requestAccess(for: .audio) { granted in
+            Task { @MainActor in
+                guard granted else {
+                    state.noteMessage = "Microphone access denied — System Settings → Privacy & Security → Microphone."
+                    state.view = .note
+                    return
+                }
+                let settings: [String: Any] = [
+                    AVFormatIDKey: kAudioFormatMPEG4AAC,
+                    AVSampleRateKey: 16_000,
+                    AVNumberOfChannelsKey: 1,
+                    AVEncoderAudioQualityKey: AVAudioQuality.medium.rawValue,
+                ]
+                guard let recorder = try? AVAudioRecorder(url: self.fileURL, settings: settings),
+                      recorder.record(forDuration: 120) else { NSSound.beep(); return }
+                self.recorder = recorder
+                self.isRecording = true
+            }
+        }
+    }
+
+    private func finish(state: AppState) {
+        recorder?.stop()
+        recorder = nil
+        isRecording = false
+        guard let size = try? fileURL.resourceValues(forKeys: [.fileSizeKey]).fileSize, size > 0 else { return }
+        state.chatHistory.append(ChatMessage(role: .user, content: "🎤 Voice message"))
+        state.stateOverride = .thinking
+        let url = fileURL
+        Task {
+            await ClaudeService.shared.chatOpenClaw(query: "", context: .file(name: "voice.m4a", fileURL: url), state: state)
+        }
+    }
+}
+
+/// 🎤 in the OpenClaw chat input: tap to record, tap again to send.
+struct MicButton: View {
+    @ObservedObject var state: AppState
+    @ObservedObject private var dictation = OpenClawDictation.shared
+
+    var body: some View {
+        Button { dictation.toggle(state: state) } label: {
+            Image(systemName: dictation.isRecording ? "stop.circle.fill" : "mic")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundColor(Color(hex: dictation.isRecording ? "#F4505E" : "#8E939C"))
+        }
+        .buttonStyle(.plain)
+        .help(dictation.isRecording ? "Send voice message" : "Dictate (ElevenLabs Scribe)")
+    }
+}

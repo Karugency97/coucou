@@ -28,6 +28,8 @@
 	<string>Pour sauter au terminal, envoyer des mails et piloter Musique.</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Pour dicter un message vocal à un agent OpenClaw depuis le notch.</string>
 	<key>NSSupportsAutomaticGraphicsSwitching</key>
 	<true/>
 </dict>

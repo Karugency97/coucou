@@ -69,6 +69,7 @@ targets:
         NSSupportsAutomaticGraphicsSwitching: YES
         NSAppleEventsUsageDescription: "Pour sauter au terminal, envoyer des mails et piloter Musique."
         NSAccessibilityUsageDescription: "Pour lire le titre de la fenêtre active et l'attacher comme contexte."
+        NSMicrophoneUsageDescription: "Pour dicter un message vocal à un agent OpenClaw depuis le notch."
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: fr.louisraille.NotchBuddy

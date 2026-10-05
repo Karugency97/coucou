@@ -879,6 +879,9 @@ struct PromptView: View {
                         .focused($focused)
                         .onSubmit { sendMessage() }
 
+                    if state.chatProvider == .openclaw && state.stateOverride != .thinking {
+                        MicButton(state: state)
+                    }
                     if state.chatProvider == .openclaw && state.stateOverride == .thinking {
                         Button { ClaudeService.shared.stopOpenClaw(state: state) } label: {
                             Image(systemName: "stop.fill")
