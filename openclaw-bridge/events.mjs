@@ -104,3 +104,16 @@ export const historyTurns = (messages = []) => messages
   .map((m) => ({ role: m.role, text: textOf(m).trim() }))
   .filter((m) => m.text)
   .slice(-30);
+
+/** Markdown reply → plain text for TTS (no "asterisk asterisk"). ponytail: 4000-char cap, Gateway limit is configurable. */
+export const speakableText = (md = "") => md
+  .replace(/```[\s\S]*?```/g, " ")            // code blocks are not read aloud
+  .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")  // links / images → their text
+  .replace(/^\s{0,3}#{1,6}\s+/gm, "")         // headings
+  .replace(/^\s*[-*+•]\s+/gm, "")             // list markers
+  .replace(/[*_`~]+/g, "")                    // emphasis / inline code markers
+  .replace(/_\(stopped\)_/g, "")
+  .replace(/[ \t]+/g, " ")
+  .replace(/\n{3,}/g, "\n\n")
+  .trim()
+  .slice(0, 4000);

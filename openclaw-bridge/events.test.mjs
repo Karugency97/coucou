@@ -100,3 +100,11 @@ test("history keeps the last 30 user/assistant text turns only", () => {
   assert.equal(historyTurns(many).length, 30);
   assert.equal(historyTurns(many)[0].text, "m10");
 });
+
+test("speakable text drops markdown syntax and code blocks", async () => {
+  const { speakableText } = await import("./events.mjs");
+  assert.equal(
+    speakableText("## Titre\n**Gras** et _italique_ avec `code`\n- point un\n```\nls -la\n```\nVoir [la doc](https://x.y)."),
+    "Titre\nGras et italique avec code\npoint un\n \nVoir la doc.");
+  assert.equal(speakableText("a".repeat(5000)).length, 4000);
+});

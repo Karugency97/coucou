@@ -1077,11 +1077,16 @@ struct ChatBubble: View {
                     .background(Color.white.opacity(0.13))
                     .clipShape(RoundedRectangle(cornerRadius: 12))
             } else {
-                Text(Self.markdown(message.content))
-                    .font(.system(size: 12.5))
-                    .foregroundColor(Color(hex: "#B0B5BE"))
-                    .fixedSize(horizontal: false, vertical: true)
-                    .textSelection(.enabled)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(Self.markdown(message.content))
+                        .font(.system(size: 12.5))
+                        .foregroundColor(Color(hex: "#B0B5BE"))
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                    if AppState.shared.chatProvider == .openclaw && !message.content.isEmpty {
+                        SpeakButton(message: message)
+                    }
+                }
                 Spacer(minLength: 8)
             }
         }

@@ -18,7 +18,7 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import {
   agentEventToCoucou, approvalDecision, approvalToCoucou, historyTurns,
-  observerToCoucou, questionToCoucou, statusSummary, textOf,
+  observerToCoucou, questionToCoucou, speakableText, statusSummary, textOf,
 } from "./events.mjs";
 
 // Timestamped log lines (launchd appends stdout/stderr to openclaw-bridge.log).
@@ -269,6 +269,7 @@ const client = new GatewayClient({
 //   {"op":"send","agentId":"main","message":"…","attachments":[{type,mimeType,fileName,content(base64)}]?} → {"type":"delta","text":<cumulative>}… then {"type":"final","text":…} | {"type":"error","message":…}
 //   {"op":"history","agentId":"main"}         → {"type":"history","messages":[{"role":"user"|"assistant","text":…}]} (last 30)
 //   {"op":"abort","agentId":"main"}           → {"type":"ok"} (the running send then ends with "final" + text so far)
+//   {"op":"speak","text":"…"}                → {"type":"audio","base64":…,"mimeType":…} (Gateway TTS voice, e.g. ElevenLabs)
 const chats = new Map(); // sessionKey → { text, write, end }
 
 function onChatEvent(p) {
@@ -291,6 +292,12 @@ async function handleChatRequest(req, conn) {
   if (req.op === "answer") {
     await client.request("question.resolve", { id: req.id, answers: { answers: req.answers }, resolvedBy: "coucou" });
     return conn.end(JSON.stringify({ type: "ok" }) + "\n");
+  }
+  if (req.op === "speak") {
+    const text = speakableText(req.text);
+    if (!text) throw new Error("nothing to read");
+    const r = await client.request("tts.speak", { text }, { timeoutMs: 60_000 });
+    return conn.end(JSON.stringify({ type: "audio", base64: r.audioBase64, mimeType: r.mimeType ?? "audio/mpeg" }) + "\n");
   }
   if (req.op === "agents") {
     const r = await client.request("agents.list", {});
